@@ -1,7 +1,7 @@
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { unpackStream } from 'ipfs-car/unpack'
 import { createS3Uploader } from '../lib/s3.js'
-import { pickup } from '../lib/pickup.js'
+import { pickup, pickupBatch } from '../lib/pickup.js'
 import { Buffer } from 'buffer'
 import test from 'ava'
 import { compose } from './_compose.js'
@@ -79,6 +79,34 @@ test('with bad origins', async t => {
   const content = await fileToString(files[0])
   t.is(content, 'test 3', 'expected file content')
   t.pass()
+})
+
+test.only('pickupBatch', async t => {
+  const { s3, createBucket, ipfsApiUrl } = t.context
+  const bucket = await createBucket()
+  const cids = [
+    'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e',
+    'bafkreig6ylslysmsgffjzgsrxpmftynqqg3uc6ebrrj4dhiy233wd5oyaq',
+    'bad'
+  ]
+  const msgs = cids.map((cid, i) => ({
+    Body: JSON.stringify({
+      cid,
+      bucket,
+      key: `batch/${cid}.car`,
+      requestid: `#${i}`
+    })
+  }))
+
+  const res = await pickupBatch(msgs, { createS3Uploader, s3, ipfsApiUrl })
+
+  t.is(res.length, 2)
+  const sorted = res.map(msg => JSON.parse(msg.Body)).sort()
+  for (let i = 0; i < sorted.length; i++) {
+    t.is(sorted[i].cid, cids[i])
+    const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: `batch/${cids[i]}.car` }))
+    t.is(res.$metadata.httpStatusCode, 200)
+  }
 })
 
 async function resToFiles (res) {

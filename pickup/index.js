@@ -10,7 +10,10 @@ async function start () {
     ipfsApiUrl: IPFS_API_URL,
     queueUrl: SQS_QUEUE_URL
   })
-
+  app.on('message_received', msg => {
+    const { requestid, cid } = JSON.parse(msg.Body)
+    console.log(`Processing req: ${requestid} cid: ${cid}`)
+  })
   app.start()
   console.log(`Pickup subscribed to ${SQS_QUEUE_URL}`)
 }

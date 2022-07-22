@@ -1,8 +1,8 @@
 import retry from 'p-retry'
 import { Consumer } from 'sqs-consumer'
 import { createS3Uploader } from './s3.js'
-import { testIpfsApi, repoStat } from './ipfs.js'
-import { pickup } from './pickup.js'
+import { testIpfsApi, waitForGC, repoStat, connectTo } from './ipfs.js'
+import { pickup, pickupBatch } from './pickup.js'
 
 export async function createConsumer ({ ipfsApiUrl, queueUrl, s3 }) {
   // throws if can't connect
@@ -10,7 +10,7 @@ export async function createConsumer ({ ipfsApiUrl, queueUrl, s3 }) {
 
   const app = Consumer.create({
     queueUrl,
-    batchSize: 1, // 1 to 10
+    batchSize: 2, // 1 to 10
     visibilityTimeout: 20, // seconds, how long to hide message from queue after reading.
     heartbeatInterval: 10, // seconds, must be lower than `visibilityTimeout`. how long before increasing the `visibilityTimeout`
     // allow 4hrs before timeout. 2/3rs of the world can upload faster than
@@ -21,17 +21,19 @@ export async function createConsumer ({ ipfsApiUrl, queueUrl, s3 }) {
     // TODO: enforce 32GiB limit
     // TODO: monitor throughput and bail early if stalled.
     handleMessageTimeout: 4 * 60 * 60 * 1000, // ms, error if processing takes longer than this.
-    handleMessage: async (message) => {
-      const { cid, origins, bucket, key, requestid } = JSON.parse(message.Body)
-      console.log(`Fetching req: ${requestid} cid: ${cid}`)
-      await pickup({
-        upload: createS3Uploader({ bucket, key, client: s3 }),
-        ipfsApiUrl,
-        origins,
-        cid
-      })
-      console.log(await repoStat(ipfsApiUrl))
+    handleMessageBatch: async (messages) => {
+      return pickupBatch(messages, { ipfsApiUrl, createS3Uploader, s3 })
     }
+    // handleMessage: async (message) => {
+    //   const { cid, origins, bucket, key, requestid } = JSON.parse(message.Body)
+    //   await pickup({
+    //     upload: createS3Uploader({ bucket, key, client: s3 }),
+    //     ipfsApiUrl,
+    //     origins,
+    //     cid
+    //   })
+    //   console.log(await repoStat(ipfsApiUrl))
+    // }
   })
 
   app.on('error', (err) => {
